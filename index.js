@@ -35,7 +35,7 @@ async function run() {
     const propertyCollection=database.collection('properties')
     const agencyCollection = database.collection('agencies');
     const usersCollection=database.collection('user')
-
+  const favoritesCollection=database.collection('favorites')
 
     app.get('/api/users', async (req, res) => {
   
@@ -147,7 +147,7 @@ app.get('/api/properties', async (req, res) => {
     if (status) matchQuery.status = status;
     if (propertyType) matchQuery.propertyType = propertyType;
     
-    // লোকেশন সার্চ: আংশিক মিল এবং কেস-ইনসেনসিটিভ করার জন্য
+   
     if (location) {
       matchQuery.location = { $regex: location, $options: 'i' };
     }
@@ -155,14 +155,13 @@ app.get('/api/properties', async (req, res) => {
     // ২. Aggregation Pipeline তৈরি
     const pipeline = [{ $match: matchQuery }];
 
-    // ৩. 'monthlyRent' স্ট্রিংকে নাম্বারে রূপান্তর করা (নিখুঁত ফিল্টার ও সর্টিং এর জন্য)
     pipeline.push({
       $addFields: {
         numericRent: { $toDouble: "$monthlyRent" }
       }
     });
 
-    // ৪. প্রাইস রেঞ্জ ফিল্টার (numericRent এর ওপর ভিত্তি করে)
+   
     if (minPrice || maxPrice) {
       const priceMatch = {};
       if (minPrice) priceMatch.$gte = parseFloat(minPrice);
@@ -173,7 +172,7 @@ app.get('/api/properties', async (req, res) => {
       });
     }
 
-    // ৫. সর্টিং স্টেজ
+    
     let sortStage = { $sort: { createdAt: -1 } }; // ডিফল্ট: নতুন প্রোপার্টি আগে
     if (sort) {
       if (sort === 'price_asc') {
@@ -193,6 +192,57 @@ app.get('/api/properties', async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+    
+
+
+app.post('/api/properties/reviews', async (req, res) => {
+  try {
+    const { propertyId, reviewerName, rating, comment } = req.body;
+
+   
+    if (!propertyId || !reviewerName || !comment) {
+      return res.status(400).json({ success: false, error: "Missing required fields" });
+    }
+
+    // ২. প্রোপার্টি আইডিটি মঙ্গোডিবির নিয়ম অনুযায়ী ভ্যালিড কিনা চেক করা
+    if (!ObjectId.isValid(propertyId)) {
+      return res.status(400).json({ success: false, error: "Invalid Property ID format" });
+    }
+
+    
+    const reviewDoc = {
+      reviewerName: reviewerName,
+      rating: parseInt(rating) || 5,
+      comment: comment,
+      createdAt: new Date().toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+    };
+
+
+    const result = await propertyCollection.updateOne(
+      { _id: new ObjectId(propertyId) }, 
+      { $push: { reviews: reviewDoc } }
+    );
+
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, error: "Property not found to review" });
+    }
+
+    return res.status(200).json({ success: true, message: "Review added successfully", review: reviewDoc });
+
+  } catch (error) {
+    console.error("Review Submit Backend Error:", error);
+    
+    return res.status(500).json({ success: false, error: "Internal Server Error" });
+  }
+});
+
+   
+
 
     app.post('/api/properties', async (req, res) => {
       const property = req.body;
@@ -266,11 +316,77 @@ app.get('/api/properties', async (req, res) => {
         }
       };
       
-      // যদি প্রোফাইল না থাকে তবে নতুন তৈরি হবে, থাকলে আপডেট হবে
+      
       const options = { upsert: true };
       const result = await agencyCollection.updateOne(query, updateDoc, options);
       res.json(result);
+     });
+    // booking related api
+    app.post("/api/bookings", async (req, res) => {
+  try {
+    const booking = req.body;
+
+    const result = await database
+      .collection("bookings")
+      .insertOne({
+        ...booking,
+        createdAt: new Date(),
+      });
+
+    res.json({
+      success: true,
+      insertedId: result.insertedId,
     });
+  } catch (error) {
+    console.error("Booking error:", error);
+    res.status(500).json({ success: false });
+  }
+});
+
+    // checkout session releted
+
+
+
+    
+    // favorite related api
+    // ফেভারিট কালেকশনে ডেটা সংরক্ষণ করার রাউট
+app.post('/api/favorites', async (req, res) => {
+  try {
+    const { propertyId } = req.body;
+    
+    // আপনার অথেনটিকেশন বা সেশন থেকে টেন্যান্টের ইমেইল বা আইডি বের করুন। 
+    // যদি অথেনটিকেশন না থাকে তবে আপাতত টেস্ট করার জন্য একটি ডামি আইডি ব্যবহার করতে পারেন।
+    const tenantEmail = req.user?.email || "tenant@example.com"; 
+
+    // ১. একই ইউজারের জন্য একই প্রোপার্টি বারবার ডুপ্লিকেট যেন না হয় (Unique Entry)
+    const filter = { tenantEmail, propertyId };
+    
+    // ২. ফেভারিট ডকুমেন্টের স্ট্রাকচার যা 'favorites' কালেকশনে জমা হবে
+    const updateDoc = {
+      $set: {
+        tenantEmail,
+        propertyId,
+        createdAt: new Date()
+      }
+    };
+
+    // ৩. 'upsert: true' এর মানে হলো ডেটা না থাকলে নতুন তৈরি হবে, থাকলে আগেরটাই আপডেট হবে (ডুপ্লিকেট হবে না)
+    const result = await favoritesCollection.updateOne(filter, updateDoc, { upsert: true });
+
+    res.status(200).json({ success: true, message: "Added to favorites collection", result });
+  } catch (error) {
+    console.error("Favorite Collection Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+    
+    
+   
+app.get('/api/my-favorites', async (req, res) => {
+  const tenantEmail = req.user?.email || "tenant@example.com";
+  const userFavorites = await favoritesCollection.find({ tenantEmail }).toArray();
+  res.json(userFavorites);
+});
 
 
     await client.db("admin").command({ ping: 1 });
