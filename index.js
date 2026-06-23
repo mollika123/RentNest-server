@@ -350,6 +350,68 @@ app.post('/api/properties/reviews', async (req, res) => {
     
     // favorite related api
     // ফেভারিট কালেকশনে ডেটা সংরক্ষণ করার রাউট
+
+// ১. ফেভারিট প্রোপার্টিগুলোর ডিটেইলসসহ ডেটা আনার API (Aggregation)
+app.get('/api/my-favorites', async (req, res) => {
+  try {
+    // আপনার অথেনটিকেশন অনুযায়ী ইমেইল ধরবেন, আপাতত ডামি রাখা হলো
+    const tenantEmail = req.query.email || "tenant@example.com"; 
+
+    const result = await favoritesCollection.aggregate([
+      {
+        $match: { tenantEmail: tenantEmail }
+      },
+      {
+        // propertyId স্ট্রিং হলে সেটিকে ObjectId তে রূপান্তর করে properties কালেকশনের _id এর সাথে ম্যাচ করা
+        $addFields: {
+          pId: { $toObjectId: "$propertyId" }
+        }
+      },
+      {
+        $lookup: {
+          from: "properties", // properties কালেকশনের নাম
+          localField: "pId",
+          foreignField: "_id",
+          as: "propertyDetails"
+        }
+      },
+      {
+        $unwind: "$propertyDetails" // অ্যারে থেকে অবজেক্টে রূপান্তর
+      },
+      {
+        $project: {
+          _id: 1,
+          propertyId: 1,
+          tenantEmail: 1,
+          name: "$propertyDetails.propertyName", // আপনার কালেকশনের ফিল্ড নেম অনুযায়ী চেঞ্জ করতে পারেন
+          location: "$propertyDetails.location",
+          price: "$propertyDetails.monthlyRent"
+        }
+      }
+    ]).toArray();
+
+    res.json(result);
+  } catch (error) {
+    console.error("Fetch Favorites Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// ২. ফেভারিট লিস্ট থেকে ডিলিট করার API
+app.delete('/api/favorites/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const result = await favoritesCollection.deleteOne(query);
+    res.json(result);
+  } catch (error) {
+    console.error("Delete Favorite Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+
 app.post('/api/favorites', async (req, res) => {
   try {
     const { propertyId } = req.body;
