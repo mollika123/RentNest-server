@@ -459,6 +459,11 @@ app.post('/api/properties/reviews', async (req, res) => {
 });
 
    
+    // features properties
+        app.get("/api/features", async (req, res) => {
+      const result = await propertyCollection.find().limit(6).toArray();
+      res.json(result);
+    });
 
 
     app.post('/api/properties', async (req, res) => {
