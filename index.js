@@ -36,7 +36,7 @@ async function run() {
     const agencyCollection = database.collection('agencies');
     const usersCollection=database.collection('user')
   const favoritesCollection=database.collection('favorites')
-
+const bookingCollection=database.collection('bookings')
     app.get('/api/users', async (req, res) => {
   
       const cursor = usersCollection.find().skip(2)
@@ -245,7 +245,7 @@ console.log(result);
 
     // ✅ PUBLIC RULE: only approved properties
     const matchQuery = {
-      status: "approved",
+      status: "Approved",
     };
 
     if (userId) matchQuery.ownerId = userId;
@@ -357,7 +357,41 @@ console.log(result);
   }
   });
     
-    // admin status change 
+    
+    // admin all booking get
+       app.get(
+      "/api/admin/bookings",
+      
+      async (req, res) => {
+        const result = await bookingCollection.find({}).toArray();
+        res.json(result);
+      },
+    );
+    // admin transection
+    
+    app.get("/api/admin/transactions", async (req, res) => {
+  try {
+    const result = await bookingCollection
+      .find({ paymentStatus: "paid" })
+      .toArray();
+
+    const transactions = result.map((b) => ({
+      transactionId: b.stripeSessionId,
+      propertyName: b.propertyName,
+      tenantName: b.userName,
+      ownerName: b.ownerName || "N/A",
+      amount: b.amount,
+      date: b.createdAt,
+    }));
+
+    res.send(transactions);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to load transactions" });
+  }
+});
+    // admin status change
+
+    
     app.patch("/api/properties/:id/status", async (req, res) => {
   try {
     const { id } = req.params;
