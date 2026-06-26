@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const app = express()
 
-const port = 5000
+const port = process.env.PORT
 require('dotenv').config()
 
 app.use(cors());
@@ -801,6 +801,72 @@ app.get('/api/my-favorites', async (req, res) => {
   const tenantEmail = req.user?.email || "tenant@example.com";
   const userFavorites = await favoritesCollection.find({ tenantEmail }).toArray();
   res.json(userFavorites);
+});
+    
+    // owner overview
+app.get("/api/owner/analyse/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    // ১. ওনারের ইমেইল অনুযায়ী সব বুকিং ডাটা আনা (এখান থেকেই আয়ের হিসাব হবে)
+    // (যদি বুকিং কালেকশনে ownerEmail না থেকে থাকে, তবে যে ফিল্ডে ওনারের ইমেইল আছে সেটি দিন)
+    const bookings = await bookingCollection.find({ ownerEmail: email }).toArray();
+
+    // ২. ওনারের মোট প্রোপার্টি কয়টি তা কাউন্ট করা
+    const totalProperties = await propertyCollection.countDocuments({ ownerEmail: email });
+
+    // ৩. গত ১২ মাসের একটি খালি চার্ট স্ট্রাকচার তৈরি করা
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(1); // মাসের ১ তারিখ সেট করে নেওয়া নিরাপদ
+      d.setMonth(d.getMonth() - i);
+
+      months.push({
+        key: `${d.getFullYear()}-${d.getMonth() + 1}`,
+        label: d.toLocaleString("default", { month: "short" }),
+        earnings: 0,
+      });
+    }
+
+    // ৪. বুকিংয়ের ডাটা থেকে প্রতি মাসের আয়ের হিসাব চার্টে যোগ করা
+    bookings.forEach((b) => {
+      // p.createdAt বা b.createdAt (যে ডেটে বুকিং বা পেমেন্ট হয়েছে)
+      const bookingDate = b.createdAt || b.bookingDate; 
+      
+      if (bookingDate) {
+        const date = new Date(bookingDate);
+        const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+
+        const match = months.find((m) => m.key === key);
+        if (match) {
+          // b.amount বা b.price (আপনার বুকিং কালেকশনে টাকার ফিল্ডের নাম যা দিয়েছেন)
+          match.earnings += Number(b.amount || b.price || b.rent || 0);
+        }
+      }
+    });
+
+    // ৫. সব বুকিং যোগ করে মোট আয় (Total Earnings) বের করা
+    const totalEarnings = bookings.reduce(
+      (sum, b) => sum + Number(b.amount || b.price || b.rent || 0),
+      0
+    );
+
+    // ৬. মোট বুকিং সংখ্যা
+    const totalBookings = bookings.length;
+
+    // ৭. ফ্রন্টএন্ডে অবজেক্ট আকারে রেসপন্স পাঠানো
+    res.json({
+      totalEarnings,
+      totalProperties,
+      totalBookings,
+      chart: months,
+    });
+
+  } catch (error) {
+    console.error("Analysis API Error:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
 });
 
 
