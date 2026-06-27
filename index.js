@@ -1,10 +1,12 @@
+require('dotenv').config()
+
 const express = require('express');
 const cors = require('cors');
 const app = express()
 
-const port = process.env.PORT
-require('dotenv').config()
 
+
+const port = process.env.PORT
 app.use(cors());
 app.use(express.json());
 
@@ -36,7 +38,8 @@ async function run() {
     const agencyCollection = database.collection('agencies');
     const usersCollection=database.collection('user')
   const favoritesCollection=database.collection('favorites')
-const bookingCollection=database.collection('bookings')
+    const bookingCollection = database.collection('bookings')
+    const reviewsCollection = database.collection("reviews");
     app.get('/api/users', async (req, res) => {
   
       const cursor = usersCollection.find().skip(2)
@@ -186,7 +189,9 @@ console.log(result);
     app.get('/api/admin/properties', async (req, res) => {
   const result = await propertyCollection.find({}).toArray();
   res.json(result);
-});
+    });
+    
+    
 // app.get('/api/properties/admin', async (req, res) => {
 //   try {
 //     const { userId, status, location, propertyType, minPrice, maxPrice, sort } = req.query;
@@ -414,17 +419,25 @@ console.log(result);
   }
     });
     
-    app.patch("/api/properties/:id/reject", async (req, res) => {
+ app.patch("/api/properties/:id/reject", async (req, res) => {
   try {
     const { id } = req.params;
-    const { rejectionReason } = req.body;
+    const { title, feedback } = req.body;
+
+   if (!title?.trim() || !feedback?.trim()) {
+  return res.status(400).json({
+    success: false,
+    error: "Title and feedback are required",
+  });
+}
 
     const result = await propertyCollection.updateOne(
       { _id: new ObjectId(id) },
       {
         $set: {
           status: "Rejected",
-          rejectionReason,
+          rejectionTitle: title,
+          rejectionFeedback: feedback,
           updatedAt: new Date(),
         },
       }
@@ -446,52 +459,65 @@ console.log(result);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-app.post('/api/properties/reviews', async (req, res) => {
+app.post("/api/properties/reviews", async (req, res) => {
   try {
-    const { propertyId, reviewerName, rating, comment } = req.body;
+    const { propertyId, reviewerName, reviewerEmail, rating, comment } = req.body;
 
-   
     if (!propertyId || !reviewerName || !comment) {
-      return res.status(400).json({ success: false, error: "Missing required fields" });
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+      });
     }
 
-    // ২. প্রোপার্টি আইডিটি মঙ্গোডিবির নিয়ম অনুযায়ী ভ্যালিড কিনা চেক করা
     if (!ObjectId.isValid(propertyId)) {
-      return res.status(400).json({ success: false, error: "Invalid Property ID format" });
+      return res.status(400).json({
+        success: false,
+        error: "Invalid Property ID",
+      });
     }
 
-    
     const reviewDoc = {
-      reviewerName: reviewerName,
-      rating: parseInt(rating) || 5,
-      comment: comment,
-      createdAt: new Date().toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      })
+      propertyId: new ObjectId(propertyId),
+      reviewerName,
+      reviewerEmail,
+      rating: Number(rating) || 5,
+      comment,
+      createdAt: new Date(),
     };
 
+    const result = await reviewsCollection.insertOne(reviewDoc);
 
-    const result = await propertyCollection.updateOne(
-      { _id: new ObjectId(propertyId) }, 
-      { $push: { reviews: reviewDoc } }
-    );
-
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ success: false, error: "Property not found to review" });
-    }
-
-    return res.status(200).json({ success: true, message: "Review added successfully", review: reviewDoc });
-
+    res.status(201).json({
+      success: true,
+      message: "Review added",
+      review: reviewDoc,
+    });
   } catch (error) {
-    console.error("Review Submit Backend Error:", error);
-    
-    return res.status(500).json({ success: false, error: "Internal Server Error" });
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: "Server error",
+    });
   }
 });
 
+    app.get("/api/properties/tenant/reviews", async (req, res)=>{
+  
+
+  try {
+    // কোনো আইডি ছাড়াই সরাসরি সব রিভিউ খোঁজা হচ্ছে
+    const reviews = await reviewsCollection
+      .find({}) 
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(reviews);
+  } catch (error) {
+    console.error("Backend Error:", error);
+    res.status(500).json([]);
+  }
+});
    
     // features properties
         app.get("/api/features", async (req, res) => {
@@ -622,6 +648,7 @@ app.post("/api/bookings", async (req, res) => {
       email,
       userName,
       phone,
+       
       moveInDate,
       stripeSessionId // Added to track actual Stripe purchases securely
     } = req.body;
@@ -661,7 +688,7 @@ app.post("/api/bookings", async (req, res) => {
 
     // 4️⃣ Assemble finalized data
     const bookingData = {
-      propertyId,
+       propertyId: propertyId.toString(),
       propertyName: property.title || propertyName,
       email,
       userName,
@@ -804,71 +831,120 @@ app.get('/api/my-favorites', async (req, res) => {
 });
     
     // owner overview
-app.get("/api/owner/analyse/:email", async (req, res) => {
+
+
+app.get(
+  "/api/owner/analyse/:email",
+ 
+  async (req, res) => {
+    try {
+      const { email } = req.params;
+
+      // 1️⃣ Get owner properties
+    const properties = await propertyCollection.find({}).toArray();
+
+console.log(properties.map(p => p.ownerEmail));
+
+      const propertyIds = properties.map(p =>
+        p._id.toString()
+      );
+
+      // 2️⃣ Get all bookings (safe approach)
+      const allBookings = await bookingCollection.find({}).toArray();
+
+      // 3️⃣ Filter only this owner's bookings
+      const ownerBookings = allBookings.filter(b =>
+        propertyIds.includes(b.propertyId?.toString())
+      );
+
+      const totalProperties = properties.length;
+      const totalBookings = ownerBookings.length;
+      console.log("EMAIL:", email);
+console.log("PROPERTIES:", properties.length);
+
+      // 4️⃣ Earnings
+      const totalEarnings = ownerBookings.reduce(
+        (sum, b) => sum + Number(b.amount || b.price || 0),
+        0
+      );
+
+      // 5️⃣ Monthly chart
+      const months = [];
+
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+
+        months.push({
+          key: `${d.getFullYear()}-${d.getMonth() + 1}`,
+          label: d.toLocaleString("default", { month: "short" }),
+          earnings: 0,
+        });
+      }
+
+      ownerBookings.forEach((b) => {
+        const date = new Date(b.createdAt);
+
+        if (!date) return;
+
+        const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+
+        const match = months.find(m => m.key === key);
+
+        if (match) {
+          match.earnings += Number(b.amount || b.price || 0);
+        }
+      });
+
+      // 6️⃣ Response
+      res.json({
+        success: true,
+        totalProperties,
+        totalBookings,
+        totalEarnings,
+        chart: months,
+      });
+
+    } catch (error) {
+      console.error("Owner Analyse Error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal Server Error",
+      });
+    }
+  }
+);
+
+    // owner my property
+    app.get("/api/my/properties", async (req, res) => {
   try {
-    const { email } = req.params;
+    const { userId } = req.query;
 
-    // ১. ওনারের ইমেইল অনুযায়ী সব বুকিং ডাটা আনা (এখান থেকেই আয়ের হিসাব হবে)
-    // (যদি বুকিং কালেকশনে ownerEmail না থেকে থাকে, তবে যে ফিল্ডে ওনারের ইমেইল আছে সেটি দিন)
-    const bookings = await bookingCollection.find({ ownerEmail: email }).toArray();
-
-    // ২. ওনারের মোট প্রোপার্টি কয়টি তা কাউন্ট করা
-    const totalProperties = await propertyCollection.countDocuments({ ownerEmail: email });
-
-    // ৩. গত ১২ মাসের একটি খালি চার্ট স্ট্রাকচার তৈরি করা
-    const months = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(1); // মাসের ১ তারিখ সেট করে নেওয়া নিরাপদ
-      d.setMonth(d.getMonth() - i);
-
-      months.push({
-        key: `${d.getFullYear()}-${d.getMonth() + 1}`,
-        label: d.toLocaleString("default", { month: "short" }),
-        earnings: 0,
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId is required",
       });
     }
 
-    // ৪. বুকিংয়ের ডাটা থেকে প্রতি মাসের আয়ের হিসাব চার্টে যোগ করা
-    bookings.forEach((b) => {
-      // p.createdAt বা b.createdAt (যে ডেটে বুকিং বা পেমেন্ট হয়েছে)
-      const bookingDate = b.createdAt || b.bookingDate; 
-      
-      if (bookingDate) {
-        const date = new Date(bookingDate);
-        const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+    const result = await propertyCollection
+      .find({ ownerId: userId })
+      .sort({ createdAt: -1 })
+      .toArray();
 
-        const match = months.find((m) => m.key === key);
-        if (match) {
-          // b.amount বা b.price (আপনার বুকিং কালেকশনে টাকার ফিল্ডের নাম যা দিয়েছেন)
-          match.earnings += Number(b.amount || b.price || b.rent || 0);
-        }
-      }
-    });
-
-    // ৫. সব বুকিং যোগ করে মোট আয় (Total Earnings) বের করা
-    const totalEarnings = bookings.reduce(
-      (sum, b) => sum + Number(b.amount || b.price || b.rent || 0),
-      0
-    );
-
-    // ৬. মোট বুকিং সংখ্যা
-    const totalBookings = bookings.length;
-
-    // ৭. ফ্রন্টএন্ডে অবজেক্ট আকারে রেসপন্স পাঠানো
     res.json({
-      totalEarnings,
-      totalProperties,
-      totalBookings,
-      chart: months,
+      success: true,
+      count: result.length,
+      data: result,
     });
-
   } catch (error) {
-    console.error("Analysis API Error:", error);
-    res.status(500).json({ message: "Internal Server Error" });
+    console.error("My Properties Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 });
-
 
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
