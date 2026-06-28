@@ -31,51 +31,51 @@ const client = new MongoClient(uri, {
 
 
 // JWT verify
-const JWKS = createRemoteJWKSet(
-  new URL(`${process.env.BETTER_AUTH_URL}/api/auth/jwks`))
+// const JWKS = createRemoteJWKSet(
+//   new URL(`${process.env.BETTER_AUTH_URL}/api/auth/jwks`))
 
 
-const verifyToken = async (req, res, next) => {
-  const authHeders = req.headers.authorization;
+// const verifyToken = async (req, res, next) => {
+//   const authHeders = req.headers.authorization;
 
-  if (!authHeders || !authHeders.startsWith("Bearer ")) {
-    return res.status(401).json({ success: false, message: "Unauthorized" });
-  }
+//   if (!authHeders || !authHeders.startsWith("Bearer ")) {
+//     return res.status(401).json({ success: false, message: "Unauthorized" });
+//   }
 
-  const token = authHeders.split(" ")[1];
-  console.log(token);
+//   const token = authHeders.split(" ")[1];
+//   console.log(token);
 
-  if (!token) {
-    return res.status(401).json({ success: false, message: "Unauthorized" });
-  }
+//   if (!token) {
+//     return res.status(401).json({ success: false, message: "Unauthorized" });
+//   }
 
-  try {
-    const { payload } = await jwtVerify(token, JWKS);
-    req.user = payload;
+//   try {
+//     const { payload } = await jwtVerify(token, JWKS);
+//     req.user = payload;
 
-    next();
-  } catch (error) {
-    console.log(error);
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-};
-const ownerVerify = async (req, res, next) => {
-  const user = req.user;
+//     next();
+//   } catch (error) {
+//     console.log(error);
+//     return res.status(401).json({ message: "Unauthorized" });
+//   }
+// };
+// const ownerVerify = async (req, res, next) => {
+//   const user = req.user;
 
-  if (user.role !== "owner") {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  next();
-};
+//   if (user.role !== "owner") {
+//     return res.status(401).json({ message: "Unauthorized" });
+//   }
+//   next();
+// };
 
-const adminVerify = async (req, res, next) => {
-  const user = req.user;
+// const adminVerify = async (req, res, next) => {
+//   const user = req.user;
 
-  if (user.role !== "admin") {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  next();
-};
+//   if (user.role !== "admin") {
+//     return res.status(401).json({ message: "Unauthorized" });
+//   }
+//   next();
+// };
 async function run() {
   try {
 
@@ -574,7 +574,7 @@ app.post("/api/properties/reviews", async (req, res) => {
     });
 
 
-    app.post('/api/properties', verifyToken, ownerVerify, async (req, res) => {
+    app.post('/api/properties', async (req, res) => {
       
     
       
@@ -998,7 +998,7 @@ console.log("PROPERTIES:", properties.length);
   }
 });
 
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
