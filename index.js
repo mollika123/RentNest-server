@@ -12,6 +12,7 @@ app.use(express.json());
 
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { jwtVerify, createRemoteJWKSet } = require('jose-cjs');
 app.get('/', (req, res) => {
   res.send('Hello World!')
 })
@@ -28,6 +29,53 @@ const client = new MongoClient(uri, {
   }
 });
 
+
+// JWT verify
+const JWKS = createRemoteJWKSet(
+  new URL(`${process.env.BETTER_AUTH_URL}/api/auth/jwks`))
+
+
+const verifyToken = async (req, res, next) => {
+  const authHeders = req.headers.authorization;
+
+  if (!authHeders || !authHeders.startsWith("Bearer ")) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+
+  const token = authHeders.split(" ")[1];
+  console.log(token);
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    req.user = payload;
+
+    next();
+  } catch (error) {
+    console.log(error);
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+};
+const ownerVerify = async (req, res, next) => {
+  const user = req.user;
+
+  if (user.role !== "owner") {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+};
+
+const adminVerify = async (req, res, next) => {
+  const user = req.user;
+
+  if (user.role !== "admin") {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+};
 async function run() {
   try {
 
@@ -526,7 +574,11 @@ app.post("/api/properties/reviews", async (req, res) => {
     });
 
 
-    app.post('/api/properties', async (req, res) => {
+    app.post('/api/properties', verifyToken, ownerVerify, async (req, res) => {
+      
+    
+      
+    
       const property = req.body;
       const newProperty = {
         ...property,
