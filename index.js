@@ -79,7 +79,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
 
-    await client.connect();
+    // await client.connect();
 
     const database = client.db('rentnest_db');
     const propertyCollection=database.collection('properties')
